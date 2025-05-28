@@ -9,10 +9,10 @@ from sklearn.metrics import accuracy_score
 student_df = pd.read_csv("student_risk_predictions.csv")
 mapping_df = pd.read_csv("advisor_student_mapping.csv")
 
-# Define features
+# Define feature columns
 features = ["attendance_rate", "gpa", "assignment_completion", "lms_activity"]
 
-# --- Step 1: Derive Risk Level for ALL students based on rules ---
+# Generate risk level from feature scores
 def generate_risk(row):
     score = (
         row["attendance_rate"] * 0.3 +
@@ -27,34 +27,36 @@ def generate_risk(row):
     else:
         return "High"
 
-# Create risk_level column from rule-based scoring
+# Apply rule-based risk level
 student_df["risk_level"] = student_df.apply(generate_risk, axis=1)
 
-# --- Step 2: Train Model to Predict Risk Level ---
+# Encode labels
 label_map = {"Low": 0, "Medium": 1, "High": 2}
 inverse_label_map = {v: k for k, v in label_map.items()}
 student_df["risk_level_encoded"] = student_df["risk_level"].map(label_map)
 
+# Split dataset
 X = student_df[features]
 y = student_df["risk_level_encoded"]
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
+# Train model
 model = RandomForestClassifier(n_estimators=100, random_state=42)
 model.fit(X_train, y_train)
 
-# --- Step 3: Accuracy Evaluation ---
+# Calculate accuracy
 y_pred = model.predict(X_test)
 accuracy = accuracy_score(y_test, y_pred)
 
-# --- Streamlit UI ---
+# Streamlit UI
 st.set_page_config(page_title="Student Risk Predictor", layout="wide")
 st.title("🎓 Student Risk Prediction Dashboard")
 
-# ✅ Show model accuracy
-st.markdown("### ✅ Model Accuracy (based on derived training data)")
-st.metric(label="Accuracy", value=f"{accuracy * 100:.2f}%")
+# Show model accuracy
+st.markdown("### ✅ Model Accuracy (from internal test data)")
+st.metric(label="Accuracy", value=f"{accuracy * 100:.2f}%", delta=None)
 
-# --- Role & Access Control ---
+# Role selection
 role = st.selectbox("Select your role:", ["advisor", "chair"])
 user_id = st.text_input(f"Enter your {role} ID:")
 
@@ -68,8 +70,8 @@ if user_id:
 
     if not filtered_df.empty:
         X_filtered = filtered_df[features]
-        predicted_labels = model.predict(X_filtered)
-        filtered_df["Predicted Risk"] = [inverse_label_map[label] for label in predicted_labels]
+        predicted_risk = model.predict(X_filtered)
+        filtered_df["Predicted Risk"] = [inverse_label_map[p] for p in predicted_risk]
 
         st.subheader("📊 Predicted Risk for Assigned Students")
         st.dataframe(filtered_df[["student_id"] + features + ["Predicted Risk"]])
