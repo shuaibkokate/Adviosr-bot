@@ -3,8 +3,8 @@ import pandas as pd
 from sklearn.cluster import KMeans
 import numpy as np
 import plotly.express as px
-from langchain.llms import HuggingFacePipeline
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from langchain.llms import HuggingFacePipeline
 from langchain.chains import ConversationChain
 from langchain.memory import ConversationBufferMemory
 
@@ -13,29 +13,19 @@ student_df = pd.read_csv("student_risk_predictions.csv")
 mapping_df = pd.read_csv("advisor_student_mapping.csv")
 degree_df = pd.read_csv("degree_progress.csv")
 
-# Ensure student_id is string for consistent merging
 student_df["student_id"] = student_df["student_id"].astype(str)
 degree_df["student_id"] = degree_df["student_id"].astype(str)
 
-# Merge degree progress into student data
 student_df = pd.merge(student_df, degree_df, on="student_id", how="left")
 
-# Define features for clustering
+# Clustering
 features = ["attendance_rate", "gpa", "assignment_completion", "lms_activity"]
-
 X = student_df[features]
-
-# Perform KMeans clustering
 kmeans = KMeans(n_clusters=3, random_state=42)
 clusters = kmeans.fit_predict(X)
-
-# Add cluster assignments to dataframe
 student_df["cluster"] = clusters
 
-# Determine cluster risk level by comparing cluster centers
 cluster_centers = kmeans.cluster_centers_
-
-# Create a score to rank clusters by risk (lower score => higher risk)
 risk_scores = []
 for center in cluster_centers:
     score = (1 - center[features.index("attendance_rate")]) + \
@@ -44,18 +34,12 @@ for center in cluster_centers:
             (1 - center[features.index("lms_activity")])
     risk_scores.append(score)
 
-# Map clusters to risk labels based on score ranking
-sorted_clusters = np.argsort(risk_scores)[::-1]  # Descending order by risk score
-
+sorted_clusters = np.argsort(risk_scores)[::-1]
 risk_labels = ["High", "Medium", "Low"]
-cluster_to_risk = {}
-for rank, cluster_idx in enumerate(sorted_clusters):
-    cluster_to_risk[cluster_idx] = risk_labels[rank]
-
-# Map cluster assignments to risk labels
+cluster_to_risk = {cluster_idx: risk_labels[rank] for rank, cluster_idx in enumerate(sorted_clusters)}
 student_df["Predicted Risk"] = student_df["cluster"].map(cluster_to_risk)
 
-# Function to generate reason for risk level per student
+# Reasons
 def generate_risk_reason(row):
     reasons = []
     if row["attendance_rate"] < 0.75:
@@ -70,7 +54,6 @@ def generate_risk_reason(row):
 
 student_df["Risk Reason"] = student_df.apply(generate_risk_reason, axis=1)
 
-# Personalized Study Tips
 def generate_study_tips(row):
     tips = []
     if row["gpa"] < 2.0:
@@ -85,7 +68,6 @@ def generate_study_tips(row):
 
 student_df["Study Tips"] = student_df.apply(generate_study_tips, axis=1)
 
-# Flag students behind schedule
 def flag_behind_schedule(row):
     if pd.isnull(row['progress_percentage']) or pd.isnull(row['expected_progress']):
         return "Unknown"
@@ -96,14 +78,13 @@ def flag_behind_schedule(row):
 
 student_df["Schedule Status"] = student_df.apply(flag_behind_schedule, axis=1)
 
-# Load LLM model from HuggingFace (NO OpenAI key required)
-model_id = "mistralai/Mistral-7B-Instruct-v0.1"
+# Load HuggingFace Falcon model (no auth required)
+model_id = "tiiuae/falcon-rw-1b"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
-model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
+model = AutoModelForCausalLM.from_pretrained(model_id)
 pipe = pipeline("text-generation", model=model, tokenizer=tokenizer, max_new_tokens=512, do_sample=True, temperature=0.7, top_k=50, top_p=0.95)
 llm = HuggingFacePipeline(pipeline=pipe)
 
-# Conversation memory
 memory = ConversationBufferMemory()
 conversation = ConversationChain(llm=llm, memory=memory, verbose=False)
 
@@ -141,7 +122,6 @@ if user_id:
         st.markdown("### 💬 Ask the Advisor Bot")
         user_input = st.text_input("Ask a question about a student or general advising help:")
         if user_input:
-            # Check for degree progress questions
             if "how many credits" in user_input.lower() and "need to graduate" in user_input.lower():
                 sid = None
                 for student in filtered_df["student_id"]:
