@@ -3,7 +3,6 @@ import pandas as pd
 from sklearn.cluster import KMeans
 import numpy as np
 import plotly.express as px
-
 from langchain_community.llms import HuggingFacePipeline
 from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
 from langchain.chains import ConversationChain
@@ -12,16 +11,13 @@ from langchain.memory import ConversationBufferMemory
 # Load datasets
 student_df = pd.read_csv("student_risk_predictions.csv")
 mapping_df = pd.read_csv("advisor_student_mapping.csv")
-degree_df = pd.read_csv("degree_progress.csv")  # Must contain student_id, credits_completed, total_credits_required, expected_progress_pct
+degree_df = pd.read_csv("degree_progress.csv")
 
-# Ensure 'student_id' is string in all dataframes for merge
+# Ensure student_id is string for consistent merging
 student_df["student_id"] = student_df["student_id"].astype(str)
 degree_df["student_id"] = degree_df["student_id"].astype(str)
-mapping_df["student_id"] = mapping_df["student_id"].astype(str)
-mapping_df["advisor_id"] = mapping_df["advisor_id"].astype(str)
-mapping_df["program_chair_id"] = mapping_df["program_chair_id"].astype(str)
 
-# Merge degree progress info into student_df
+# Merge degree progress into student data
 student_df = pd.merge(student_df, degree_df, on="student_id", how="left")
 
 # Define features for clustering
@@ -89,59 +85,31 @@ def generate_study_tips(row):
 
 student_df["Study Tips"] = student_df.apply(generate_study_tips, axis=1)
 
-# Flag students behind schedule based on progress vs expected_progress_pct
-def check_progress_status(row):
-    if pd.isna(row["credits_completed"]) or pd.isna(row["expected_progress_pct"]):
+# Flag students behind schedule
+def flag_behind_schedule(row):
+    if pd.isnull(row['progress_percentage']) or pd.isnull(row['expected_progress']):
         return "Unknown"
-    progress_pct = row["credits_completed"] / row["total_credits_required"]
-    if progress_pct < row["expected_progress_pct"]:
+    elif row['progress_percentage'] < row['expected_progress'] - 10:
         return "Behind Schedule"
     else:
         return "On Track"
 
-student_df["Progress Status"] = student_df.apply(check_progress_status, axis=1)
+student_df["Schedule Status"] = student_df.apply(flag_behind_schedule, axis=1)
 
 # Load LLM model from HuggingFace (NO OpenAI key required)
 model_id = "mistralai/Mistral-7B-Instruct-v0.1"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 model = AutoModelForCausalLM.from_pretrained(model_id, device_map="auto")
-pipe = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer,
-    max_new_tokens=512,
-    do_sample=True,
-    temperature=0.7,
-    top_k=50,
-    top_p=0.95
-)
+pipe = pipeline("text-generation", model=model, tokenizer=tokenizer, max_new_tokens=512, do_sample=True, temperature=0.7, top_k=50, top_p=0.95)
 llm = HuggingFacePipeline(pipeline=pipe)
 
 # Conversation memory
-memory = ConversationBufferMemory(memory_key="chat_history", return_messages=True)
+memory = ConversationBufferMemory()
 conversation = ConversationChain(llm=llm, memory=memory, verbose=False)
 
-# Helper to answer credit-related queries using degree data
-def answer_credit_query(question, student_id):
-    student_row = student_df[student_df["student_id"] == student_id]
-    if student_row.empty:
-        return f"No data found for student ID {student_id}."
-    student_row = student_row.iloc[0]
-    if "credit" in question.lower() or "graduate" in question.lower():
-        credits_completed = student_row.get("credits_completed", None)
-        total_required = student_row.get("total_credits_required", None)
-        if pd.isna(credits_completed) or pd.isna(total_required):
-            return "Degree progress data not available for this student."
-        credits_left = total_required - credits_completed
-        return (f"Student {student_id} has completed {credits_completed} credits out of "
-                f"{total_required} required credits. They need {credits_left} more credits to graduate.")
-    else:
-        # Fallback to LLM conversation
-        return conversation.predict(input=question)
-
 # Streamlit UI
-st.set_page_config(page_title="Student Risk & Degree Progress Dashboard", layout="wide")
-st.title("🎓 Student Risk & Degree Progress Dashboard")
+st.set_page_config(page_title="Student Risk Predictor (Clustering)", layout="wide")
+st.title("🎓 Student Risk Prediction Dashboard (Unsupervised)")
 
 role = st.selectbox("Select your role:", ["advisor", "chair"])
 user_id = st.text_input(f"Enter your {role} ID:")
@@ -155,50 +123,39 @@ if user_id:
     filtered_df = student_df[student_df["student_id"].isin(allowed_students)]
 
     if not filtered_df.empty:
-        st.subheader("📊 Predicted Risk & Degree Progress for Assigned Students")
-        display_cols = ["student_id"] + features + ["Predicted Risk", "Risk Reason", "Study Tips", 
-                                                   "credits_completed", "total_credits_required",
-                                                   "Progress Status"]
-        st.dataframe(filtered_df[display_cols])
+        st.subheader("📊 Predicted Risk for Assigned Students")
+        st.dataframe(filtered_df[["student_id"] + features + ["Predicted Risk", "Risk Reason", "Study Tips", "progress_percentage", "required_credits", "completed_credits", "Schedule Status"]])
 
         st.markdown("### 📈 Risk Level Distribution")
         fig = px.pie(filtered_df, names="Predicted Risk", title="Risk Level Distribution")
         st.plotly_chart(fig)
 
-        st.markdown("### 📊 Progress Status Distribution")
-        fig2 = px.pie(filtered_df, names="Progress Status", title="Progress Status Distribution")
-        st.plotly_chart(fig2)
-
         csv = filtered_df.to_csv(index=False).encode('utf-8')
-        st.download_button("📥 Download Student Data as CSV", data=csv, file_name="student_data.csv", mime='text/csv')
+        st.download_button("📥 Download Predictions as CSV", data=csv, file_name="student_risk_predictions.csv", mime='text/csv')
 
         st.markdown("### 🔍 Detailed Student View")
         for _, row in filtered_df.iterrows():
             with st.expander(f"Student ID: {row['student_id']}"):
-                st.write({col: row[col] for col in features + ["Predicted Risk", "Risk Reason", "Study Tips", "credits_completed", "total_credits_required", "Progress Status"]})
+                st.write({col: row[col] for col in features + ['Predicted Risk', 'Risk Reason', 'Study Tips', 'progress_percentage', 'completed_credits', 'required_credits', 'Schedule Status']})
 
         st.markdown("### 💬 Ask the Advisor Bot")
         user_input = st.text_input("Ask a question about a student or general advising help:")
         if user_input:
-            # Simple check for credit question format
-            # Expect user to input student id, or you can improve this with better NLU
-            words = user_input.lower().split()
-            student_in_query = None
-            for word in words:
-                if word.upper() in filtered_df["student_id"].values:
-                    student_in_query = word.upper()
-                    break
-            if not student_in_query and len(filtered_df) == 1:
-                # If only one student, assume question about that student
-                student_in_query = filtered_df.iloc[0]["student_id"]
-            elif not student_in_query:
-                student_in_query = st.text_input("Please enter the student ID your question is about:")
-
-            if student_in_query:
-                answer = answer_credit_query(user_input, student_in_query)
-                st.success(answer)
+            # Check for degree progress questions
+            if "how many credits" in user_input.lower() and "need to graduate" in user_input.lower():
+                sid = None
+                for student in filtered_df["student_id"]:
+                    if student in user_input:
+                        sid = student
+                        break
+                if sid:
+                    student_row = filtered_df[filtered_df["student_id"] == sid].iloc[0]
+                    needed = student_row["required_credits"] - student_row["completed_credits"]
+                    st.success(f"Student {sid} needs {needed} more credits to graduate.")
+                else:
+                    st.warning("Could not identify the student ID in your question.")
             else:
-                st.warning("Could not detect student ID in question or input.")
-
+                response = conversation.predict(input=user_input)
+                st.success(response)
     else:
         st.warning("No students found for this user ID.")
