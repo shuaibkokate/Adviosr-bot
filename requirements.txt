@@ -7,3 +7,5 @@ transformers
 torch
 langchain
 accelerate
+sentence-transformers
+huggingface-hub
