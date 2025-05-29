@@ -1,0 +1,9 @@
+streamlit
+pandas
+numpy
+plotly
+scikit-learn
+openai
+langchain>=0.1.0
+langchain-community
+langchain-core
