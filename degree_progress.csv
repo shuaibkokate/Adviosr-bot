@@ -1,0 +1,6 @@
+student_id,progress_percentage,required_credits,completed_credits,expected_progress
+S001,50,120,60,60
+S002,20,120,24,40
+S003,75,120,90,75
+S004,10,120,12,30
+S005,85,120,102,85
