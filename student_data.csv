@@ -1,0 +1,4 @@
+student_id,name,program,semester,credits_completed,total_credits,GPA
+S001,Alice,BSc CS,2,30,120,3.5
+S002,Bob,BSc CS,3,45,120,2.8
+S003,Charlie,BSc CS,1,10,120,3.9
