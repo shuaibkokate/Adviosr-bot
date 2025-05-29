@@ -9,3 +9,4 @@ langchain
 accelerate
 sentence-transformers
 huggingface-hub
+langchain-community
